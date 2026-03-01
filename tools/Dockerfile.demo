@@ -1,0 +1,18 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LIBGL_ALWAYS_SOFTWARE=1 \
+    EGL_PLATFORM=surfaceless
+
+# Python build deps + Mesa software GL (llvmpipe) for headless rendering
+RUN apt-get update && apt-get install -y \
+        python3 python3-pip python3-dev \
+        gcc g++ \
+        libgl1-mesa-dri \
+        libegl1 libegl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --no-cache-dir moderngl pillow numpy
+
+WORKDIR /project
+CMD ["python3", "tools/make_demo.py"]

@@ -1,0 +1,99 @@
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform float2    resolution;
+uniform float     pixel_size;  // block size in screen pixels (1 = no downscale)
+
+// Active 4-color palette, pushed from C each frame
+uniform float3 pal0;
+uniform float3 pal1;
+uniform float3 pal2;
+uniform float3 pal3;
+
+sampler_state textureSampler {
+	Filter   = Point;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+// Nearest palette color by squared RGB distance (unrolled)
+float3 nearest_pal(float3 c)
+{
+	float3 best = pal0;
+	float  bd   = dot(c - pal0, c - pal0);
+	float3 d;
+	float  dist;
+
+	d = c - pal1; dist = dot(d, d);
+	if (dist < bd) { bd = dist; best = pal1; }
+
+	d = c - pal2; dist = dot(d, d);
+	if (dist < bd) { bd = dist; best = pal2; }
+
+	d = c - pal3; dist = dot(d, d);
+	if (dist < bd) { best = pal3; }
+
+	return best;
+}
+
+// 4x4 Bayer threshold in [-0.5, 0.4375].
+// low_px: integer low-res pixel coordinate (already floor'd).
+// Uses float fmod and float4 rows to avoid static-const arrays
+// and integer modulo — both of which OBS's HLSL→GLSL transpiler
+// may not handle.
+float bayer_threshold(float2 low_px)
+{
+	float col = fmod(low_px.x, 4.0);
+	float row = fmod(low_px.y, 4.0);
+
+	float4 brow;
+	if      (row < 1.0) brow = float4( 0.0,  8.0,  2.0, 10.0);
+	else if (row < 2.0) brow = float4(12.0,  4.0, 14.0,  6.0);
+	else if (row < 3.0) brow = float4( 3.0, 11.0,  1.0,  9.0);
+	else                brow = float4(15.0,  7.0, 13.0,  5.0);
+
+	float bval;
+	if      (col < 1.0) bval = brow.x;
+	else if (col < 2.0) bval = brow.y;
+	else if (col < 3.0) bval = brow.z;
+	else                bval = brow.w;
+
+	return bval / 16.0 - 0.5;
+}
+
+struct VertData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+VertData VSDefault(VertData v_in)
+{
+	VertData vert_out;
+	vert_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	vert_out.uv  = v_in.uv;
+	return vert_out;
+}
+
+float4 PSCGADither(VertData v_in) : TARGET
+{
+	// Snap UV to the nearest low-res pixel centre, then sample.
+	// This pixelates the image to blocks of pixel_size×pixel_size screen pixels.
+	float2 low_px    = floor(v_in.uv * resolution / pixel_size);
+	float2 snapped   = (low_px + 0.5) * pixel_size / resolution;
+	float4 samp      = image.Sample(textureSampler, snapped);
+
+	// Bayer tile is indexed by low-res pixel so the pattern locks to blocks.
+	// Scale ~1/3: covers the smallest channel gap between CGA palette entries.
+	float  threshold = bayer_threshold(low_px);
+	float3 dithered  = clamp(samp.rgb + threshold / 3.0, 0.0, 1.0);
+
+	return float4(nearest_pal(dithered), samp.a);
+}
+
+technique Draw
+{
+	pass
+	{
+		vertex_shader = VSDefault(v_in);
+		pixel_shader  = PSCGADither(v_in);
+	}
+}
