@@ -49,6 +49,14 @@ jobs:
           path: obs-src
           sparse-checkout: libobs
 
+      - name: Arrange OBS headers
+        shell: pwsh
+        run: |
+          # Mirror the Linux PPA layout: headers live under an obs/ subdirectory
+          # so that #include <obs/obs-module.h> resolves correctly on both platforms.
+          New-Item -ItemType Directory -Path obs-include -Force
+          Copy-Item obs-src\libobs -Destination obs-include\obs -Recurse
+
       - name: Get OBS Windows release
         shell: pwsh
         run: |
@@ -72,7 +80,7 @@ jobs:
       - name: Build
         shell: pwsh
         run: |
-          $obsInc = "${{ github.workspace }}\obs-src\libobs"
+          $obsInc = "${{ github.workspace }}\obs-include"
           $obsLib = "${{ github.workspace }}\obs.lib"
           cmake -B build `
             -DCMAKE_BUILD_TYPE=Release `
