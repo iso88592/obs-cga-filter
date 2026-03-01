@@ -12,6 +12,7 @@ RUN apt-get update \
         gcc \
         g++ \
         libobs-dev \
+        pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src

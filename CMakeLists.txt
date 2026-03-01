@@ -1,17 +1,19 @@
 cmake_minimum_required(VERSION 3.16)
-project(obs-cga-filter VERSION 0.1.0)
+project(obs-cga-filter VERSION 0.1.0 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 17)
 
-find_package(libobs REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(OBS REQUIRED libobs)
 
 add_library(obs-cga-filter MODULE
     src/cga-filter.c
 )
 
-target_link_libraries(obs-cga-filter PRIVATE OBS::libobs)
+target_include_directories(obs-cga-filter PRIVATE ${OBS_INCLUDE_DIRS})
+target_link_libraries(obs-cga-filter PRIVATE ${OBS_LIBRARIES})
+target_compile_options(obs-cga-filter PRIVATE ${OBS_CFLAGS_OTHER})
 
-# OBS plugins have no "lib" prefix
 set_target_properties(obs-cga-filter PROPERTIES PREFIX "")
 
 install(TARGETS obs-cga-filter
