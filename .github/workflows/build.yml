@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  OBS_VERSION: '30.2.2'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OBS
+        run: |
+          sudo add-apt-repository ppa:obsproject/obs-studio
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc libobs-dev
+
+      - name: Build
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=dist
+          cmake --build build
+          cmake --install build
+
+      - name: Package
+        run: tar -czf obs-cga-filter-linux-x86_64.tar.gz -C dist obs-cga-filter
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: obs-cga-filter-linux-x86_64.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Get OBS headers
+        uses: actions/checkout@v4
+        with:
+          repository: obsproject/obs-studio
+          ref: ${{ env.OBS_VERSION }}
+          path: obs-src
+          sparse-checkout: libobs
+
+      - name: Get OBS Windows release
+        shell: pwsh
+        run: |
+          $url = "https://github.com/obsproject/obs-studio/releases/download/$env:OBS_VERSION/OBS-Studio-$env:OBS_VERSION-Windows.zip"
+          Invoke-WebRequest $url -OutFile obs.zip
+          Expand-Archive obs.zip obs-bin
+
+      - name: Generate obs.lib
+        shell: pwsh
+        run: |
+          $dll = Get-ChildItem obs-bin -Recurse -Filter obs.dll |
+                 Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "Found DLL: $dll"
+          $raw   = dumpbin /exports $dll
+          $funcs = $raw |
+                   Where-Object { $_ -match '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+\S' } |
+                   ForEach-Object { ($_.Trim() -split '\s+')[3] }
+          (@('LIBRARY obs', 'EXPORTS') + $funcs) | Set-Content obs.def
+          lib /def:obs.def /machine:x64 /out:obs.lib /nologo
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $obsInc = "${{ github.workspace }}\obs-src\libobs"
+          $obsLib = "${{ github.workspace }}\obs.lib"
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_INSTALL_PREFIX=dist `
+            -DOBS_INCLUDE_DIR="$obsInc" `
+            -DOBS_LIB="$obsLib"
+          cmake --build build --config Release
+          cmake --install build --config Release
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive dist\obs-cga-filter obs-cga-filter-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: obs-cga-filter-windows-x64.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            obs-cga-filter-linux-x86_64.tar.gz
+            obs-cga-filter-windows-x64.zip
